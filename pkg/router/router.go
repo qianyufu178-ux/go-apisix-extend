@@ -8,8 +8,13 @@ package router
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 	"sync/atomic"
 )
+
+// MethodAny 表示该路由匹配任意 HTTP 方法（配置里写 "*"）。
+const MethodAny = "*"
 
 // Route 路由规则
 type Route struct {
@@ -37,6 +42,13 @@ const (
 type routeEntry struct {
 	route     *Route
 	matchType matchType
+	// prefix 前缀匹配时缓存的路径前缀（已去掉结尾的 *），避免每次匹配重复切片
+	prefix string
+}
+
+// methodMatches 判断请求方法是否命中本条目
+func (e *routeEntry) methodMatches(method string) bool {
+	return e.route.Method == MethodAny || e.route.Method == method
 }
 
 // Router 路由接口
@@ -65,6 +77,8 @@ type routeTable struct {
 	// exact 精确匹配路由表
 	// key: "METHOD:path", value: *routeEntry
 	exact map[string]*routeEntry
+	// prefix 前缀匹配路由表（按前缀长度倒序，保证最长前缀优先命中）
+	prefix []*routeEntry
 }
 
 // NewRouter 创建无锁路由器
@@ -77,9 +91,23 @@ func NewRouter() Router {
 	return r
 }
 
+// routeKeySep 路由键分隔符
+const routeKeySep = ":"
+
 // buildRouteKey 构建路由键
+//
+// 使用字符串拼接而非 fmt.Sprintf：Sprintf 会带来多次反射/缓冲分配，
+// 拼接在等长输出下只产生 1 次字符串分配（写入路径才会调用）。
 func buildRouteKey(method, path string) string {
-	return fmt.Sprintf("%s:%s", method, path)
+	return method + routeKeySep + path
+}
+
+// classifyPath 判定路径匹配类型：以 * 结尾视为前缀匹配（/api/*），否则精确匹配。
+func classifyPath(path string) (matchType, string) {
+	if strings.HasSuffix(path, "*") {
+		return matchPrefix, strings.TrimSuffix(path, "*")
+	}
+	return matchExact, ""
 }
 
 // AddRoute 添加路由规则（Copy-On-Write）
@@ -101,20 +129,35 @@ func (r *router) AddRoute(route *Route) error {
 	oldTable := r.routes.Load().(*routeTable)
 
 	// Copy-On-Write：创建新路由表
+	key := buildRouteKey(route.Method, route.Path)
 	newTable := &routeTable{
-		exact: make(map[string]*routeEntry, len(oldTable.exact)+1),
+		exact:  make(map[string]*routeEntry, len(oldTable.exact)+1),
+		prefix: make([]*routeEntry, 0, len(oldTable.prefix)+1),
 	}
-
-	// 复制旧数据
 	for k, v := range oldTable.exact {
-		newTable.exact[k] = v
+		if k != key {
+			newTable.exact[k] = v
+		}
+	}
+	for _, entry := range oldTable.prefix {
+		// 直接比字段，避免为每条前缀路由构建临时 key（写入路径也免分配）
+		if entry.route.Method == route.Method && entry.route.Path == route.Path {
+			continue
+		}
+		newTable.prefix = append(newTable.prefix, entry)
 	}
 
 	// 添加新路由
-	key := buildRouteKey(route.Method, route.Path)
-	newTable.exact[key] = &routeEntry{
-		route:     route,
-		matchType: matchExact,
+	match, prefix := classifyPath(route.Path)
+	entry := &routeEntry{route: route, matchType: match, prefix: prefix}
+	if match == matchPrefix {
+		newTable.prefix = append(newTable.prefix, entry)
+		// 最长前缀优先：/api/v1/* 应优先于 /api/*
+		sort.SliceStable(newTable.prefix, func(i, j int) bool {
+			return len(newTable.prefix[i].prefix) > len(newTable.prefix[j].prefix)
+		})
+	} else {
+		newTable.exact[key] = entry
 	}
 
 	// 原子替换
@@ -131,19 +174,33 @@ func (r *router) RemoveRoute(method, path string) error {
 	oldTable := r.routes.Load().(*routeTable)
 	key := buildRouteKey(method, path)
 
-	if _, exists := oldTable.exact[key]; !exists {
+	_, inExact := oldTable.exact[key]
+	hasPrefix := false
+	for _, entry := range oldTable.prefix {
+		if entry.route.Method == method && entry.route.Path == path {
+			hasPrefix = true
+			break
+		}
+	}
+	if !inExact && !hasPrefix {
 		return fmt.Errorf("route not found: %s %s", method, path)
 	}
 
 	// Copy-On-Write：创建新路由表
 	newTable := &routeTable{
-		exact: make(map[string]*routeEntry, len(oldTable.exact)-1),
+		exact:  make(map[string]*routeEntry, len(oldTable.exact)),
+		prefix: make([]*routeEntry, 0, len(oldTable.prefix)),
 	}
-
 	for k, v := range oldTable.exact {
 		if k != key {
 			newTable.exact[k] = v
 		}
+	}
+	for _, entry := range oldTable.prefix {
+		if buildRouteKey(entry.route.Method, entry.route.Path) == key {
+			continue
+		}
+		newTable.prefix = append(newTable.prefix, entry)
 	}
 
 	r.routes.Store(newTable)
@@ -151,12 +208,25 @@ func (r *router) RemoveRoute(method, path string) error {
 }
 
 // Match 匹配路由（Lock-Free 读取）
+//
+// 先 O(1) 精确匹配，再按最长前缀命中前缀规则；
+// 两者都不命中才返回 false。
 func (r *router) Match(method, path string) (*Route, bool) {
 	table := r.routes.Load().(*routeTable)
-	key := buildRouteKey(method, path)
 
-	if entry, ok := table.exact[key]; ok {
+	// 路由键在 map 下标里内联拼接：编译器不会为这次查找分配临时字符串，
+	// 读路径（每请求必经）因此保持零分配；key 只由写入路径显式构建。
+	if entry, ok := table.exact[method+routeKeySep+path]; ok {
 		return entry.route, true
+	}
+
+	for _, entry := range table.prefix {
+		if !entry.methodMatches(method) {
+			continue
+		}
+		if strings.HasPrefix(path, entry.prefix) {
+			return entry.route, true
+		}
 	}
 
 	return nil, false
@@ -165,8 +235,11 @@ func (r *router) Match(method, path string) (*Route, bool) {
 // Snapshot 获取当前路由快照
 func (r *router) Snapshot() []*Route {
 	table := r.routes.Load().(*routeTable)
-	routes := make([]*Route, 0, len(table.exact))
+	routes := make([]*Route, 0, len(table.exact)+len(table.prefix))
 	for _, entry := range table.exact {
+		routes = append(routes, entry.route)
+	}
+	for _, entry := range table.prefix {
 		routes = append(routes, entry.route)
 	}
 	return routes

@@ -47,6 +47,8 @@ type Config struct {
 	Routes []RouteConfig `yaml:"routes"`
 	// Plugins 插件配置
 	Plugins PluginConfig `yaml:"plugins"`
+	// Live 直播接入面配置
+	Live LiveConfig `yaml:"live"`
 }
 
 // ServerConfig 服务配置
@@ -103,6 +105,23 @@ type RateLimitConfig struct {
 	Enabled bool `yaml:"enabled"`
 }
 
+// LiveConfig 直播接入面配置
+//
+// 开启后网关内嵌发布/订阅扇出中心：
+//
+//	PUT|POST /ingest/live/{name}  采集端推流
+//	GET      /ingest/live/{name}  转码器拉流
+type LiveConfig struct {
+	// Enabled 是否启用直播接入面
+	Enabled bool `yaml:"enabled"`
+	// PublishToken 推流令牌（为空表示不校验）
+	PublishToken string `yaml:"publish_token"`
+	// QueueSize 每个订阅者的缓冲块数（默认 64）
+	QueueSize int `yaml:"queue_size"`
+	// IdleTimeout 订阅空闲超时（默认 30s）
+	IdleTimeout Duration `yaml:"idle_timeout"`
+}
+
 // DefaultConfig 返回默认配置
 func DefaultConfig() *Config {
 	return &Config{
@@ -131,6 +150,11 @@ func DefaultConfig() *Config {
 				Capacity: 100,
 				Enabled:  false,
 			},
+		},
+		Live: LiveConfig{
+			Enabled:     false,
+			QueueSize:   64,
+			IdleTimeout: Duration{Duration: 30 * time.Second},
 		},
 	}
 }

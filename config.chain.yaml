@@ -1,0 +1,84 @@
+# ---------------------------------------------------------------------------
+# 端到端串流演示配置：电脑摄像头 → 网关 → 转码器 → 浏览器
+#
+#   采集端：go-agent-collect/cmd/cam-push（FFmpeg dshow 采集 + MPEG-TS over HTTP 推流）
+#   网关  ：本配置文件，8082 端口，内嵌直播接入面 + 反向代理
+#   转码器：go-nexus-stream（NEXUS_INPUT_URL 指向 http://127.0.0.1:8082/ingest/live/cam0）
+#
+# 启动：go run cmd/server/main.go -config config.chain.yaml
+# ---------------------------------------------------------------------------
+server:
+  host: "0.0.0.0"
+  port: 8082
+  # 推流 / 拉流 / WebSocket 都是长连接，读写超时必须置 0，否则会被服务器强制断开
+  read_timeout: 0s
+  write_timeout: 0s
+  shutdown_timeout: 5s
+
+live:
+  enabled: true
+  # 推流令牌：采集端通过 X-Ingest-Token 携带；拉流（转码器）不校验
+  publish_token: "nexus-demo-token"
+  # 每个订阅者的缓冲块数（单块 ≤ 64KB）。慢订阅者队列满后按整块丢弃并计数。
+  queue_size: 64
+  # 订阅连接空闲多久主动断开（交给转码器 FFmpeg 自动重连）
+  idle_timeout: 30s
+
+routes:
+  # === 媒体面：网关内嵌 live 模块处理，不走反向代理 ===
+  - method: "PUT"
+    path: "/ingest/live/*"
+    backend: "local://live"
+    weight: 1
+
+  - method: "POST"
+    path: "/ingest/live/*"
+    backend: "local://live"
+    weight: 1
+
+  - method: "GET"
+    path: "/ingest/live/*"
+    backend: "local://live"
+    weight: 1
+
+  - method: "GET"
+    path: "/ingest/live"
+    backend: "local://live"
+    weight: 1
+
+  # === 控制面：大屏 SPA / REST / WebSocket 全部经网关反代到 nexus-core ===
+  - method: "*"
+    path: "/api/*"
+    backend: "http://127.0.0.1:8099"
+    weight: 1
+
+  - method: "GET"
+    path: "/ws/telemetry"
+    backend: "http://127.0.0.1:8099"
+    weight: 1
+
+  - method: "GET"
+    path: "/assets/*"
+    backend: "http://127.0.0.1:8099"
+    weight: 1
+
+  - method: "GET"
+    path: "/"
+    backend: "http://127.0.0.1:8099"
+    weight: 1
+
+  # SPA 兜底：favicon / 前端深链接等一律回落到 nexus-core 的静态处理器
+  # （最长前缀优先，不会覆盖上面更具体的 /ingest/live/* 与 /api/*）
+  - method: "GET"
+    path: "/*"
+    backend: "http://127.0.0.1:8099"
+    weight: 1
+
+plugins:
+  auth:
+    secret: "nexus-demo-token"
+    enabled: false
+  rate_limit:
+    rate: 2000
+    capacity: 400
+    enabled: true

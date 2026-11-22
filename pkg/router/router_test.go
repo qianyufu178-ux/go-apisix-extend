@@ -260,16 +260,103 @@ func BenchmarkMatch(b *testing.B) {
 }
 
 // BenchmarkAddRoute 基准测试添加路由性能
+//
+// AddRoute 采用 Copy-On-Write（写时复制）：单次写成本正比于当前路由表长度。
+// 早期版本让路由表在 b.N 次循环里持续增长，整体退化为 O(n^2)，表变大后基准跑不完。
+// 这里改为「固定表长 + 子基准」：每轮重建固定规模的路由表（不计时），只对 1 次 AddRoute 计时，
+// 因此能直接读出 COW 写成本随表长的增长曲线（这也解释了为什么它只适合低频写、高频读）。
 func BenchmarkAddRoute(b *testing.B) {
+	for _, size := range []int{10, 100, 1000} {
+		b.Run(fmt.Sprintf("size=%d", size), func(b *testing.B) {
+			seed := make([]*Route, 0, size)
+			for i := 0; i < size; i++ {
+				seed = append(seed, &Route{
+					Method:  "GET",
+					Path:    fmt.Sprintf("/seed/v1/%d", i),
+					Backend: "http://test-service:8080",
+				})
+			}
+			newRoute := &Route{
+				Method:  "POST",
+				Path:    "/bench/add",
+				Backend: "http://test-service:8080",
+			}
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				b.StopTimer()
+				r := NewRouter()
+				for _, rt := range seed {
+					_ = r.AddRoute(rt)
+				}
+				b.StartTimer()
+
+				if err := r.AddRoute(newRoute); err != nil {
+					b.Fatalf("AddRoute() failed: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// ==================== 🔴 TDD Step 6: 前缀匹配 / 方法通配 ====================
+
+// TestMatch_Prefix 测试前缀匹配与最长前缀优先
+func TestMatch_Prefix(t *testing.T) {
 	r := NewRouter()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		path := fmt.Sprintf("/api/v%d/test", i)
-		r.AddRoute(&Route{
-			Method:  "GET",
-			Path:    path,
-			Backend: "http://test-service:8080",
-		})
+	r.AddRoute(&Route{Method: "GET", Path: "/api/*", Backend: "http://api-root"})
+	r.AddRoute(&Route{Method: "GET", Path: "/api/v1/*", Backend: "http://api-v1"})
+	r.AddRoute(&Route{Method: "*", Path: "/assets/*", Backend: "http://static"})
+
+	tests := []struct {
+		method  string
+		path    string
+		wantOK  bool
+		wantURL string
+	}{
+		{"GET", "/api/users/1", true, "http://api-root"},
+		{"GET", "/api/v1/users/1", true, "http://api-v1"},
+		{"POST", "/api/v1/users", false, ""},
+		{"POST", "/assets/index.js", true, "http://static"},
+		{"GET", "/assets/index.js", true, "http://static"},
+		{"GET", "/other", false, ""},
+	}
+
+	for _, tt := range tests {
+		got, ok := r.Match(tt.method, tt.path)
+		if ok != tt.wantOK {
+			t.Errorf("Match(%s, %s) ok = %v, want %v", tt.method, tt.path, ok, tt.wantOK)
+			continue
+		}
+		if ok && got.Backend != tt.wantURL {
+			t.Errorf("Match(%s, %s) Backend = %s, want %s", tt.method, tt.path, got.Backend, tt.wantURL)
+		}
+	}
+}
+
+// TestMatch_ExactBeatsPrefix 测试精确匹配优先于前缀匹配
+func TestMatch_ExactBeatsPrefix(t *testing.T) {
+	r := NewRouter()
+	r.AddRoute(&Route{Method: "GET", Path: "/api/*", Backend: "http://api-root"})
+	r.AddRoute(&Route{Method: "GET", Path: "/api/health", Backend: "http://health"})
+
+	got, ok := r.Match("GET", "/api/health")
+	if !ok || got.Backend != "http://health" {
+		t.Fatalf("exact route should win, got %v (%v)", got, ok)
+	}
+}
+
+// TestRemoveRoute_Prefix 测试移除前缀路由
+func TestRemoveRoute_Prefix(t *testing.T) {
+	r := NewRouter()
+	r.AddRoute(&Route{Method: "GET", Path: "/api/*", Backend: "http://api-root"})
+
+	if err := r.RemoveRoute("GET", "/api/*"); err != nil {
+		t.Fatalf("RemoveRoute(prefix) failed: %v", err)
+	}
+	if _, ok := r.Match("GET", "/api/users"); ok {
+		t.Error("prefix route should be removed")
 	}
 }

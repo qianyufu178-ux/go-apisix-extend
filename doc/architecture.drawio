@@ -1,0 +1,414 @@
+<mxfile host="app.diagrams.net" modified="2026-11-22T13:00:00.000Z" agent="cline" version="24.7.17" type="device">
+  <diagram id="chain" name="01 全链路">
+    <mxGraphModel dx="1500" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="820" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="gAgent" value="采集端 · go-agent-collect / cam-push（Windows）" style="swimlane;html=1;startSize=26;rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="30" y="60" width="290" height="300" as="geometry" />
+        </mxCell>
+        <mxCell id="cam" value="摄像头&#10;DirectShow" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="gAgent">
+          <mxGeometry x="25" y="50" width="240" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="ffmpeg" value="FFmpeg&#10;libx264 veryfast / main&#10;H.264 + MPEG-TS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="gAgent">
+          <mxGeometry x="25" y="125" width="240" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="put" value="HTTP chunked PUT&#10;/ingest/live/cam0&#10;X-Ingest-Token" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="gAgent">
+          <mxGeometry x="25" y="210" width="240" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="eCamFf" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="gAgent" source="cam" target="ffmpeg">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eFfPut" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="gAgent" source="ffmpeg" target="put">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="gGw" value="统一入口 · go-apisix-extend :8082" style="swimlane;html=1;startSize=26;rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="380" y="60" width="330" height="470" as="geometry" />
+        </mxCell>
+        <mxCell id="route" value="无锁路由&#10;atomic.Value + COW&#10;最长前缀优先" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="gGw">
+          <mxGeometry x="30" y="45" width="270" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="plugin" value="插件链（洋葱）&#10;auth 401 · rate_limit CAS · metrics 原子计数" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="gGw">
+          <mxGeometry x="30" y="130" width="270" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="backend" value="backend 判定" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="gGw">
+          <mxGeometry x="95" y="215" width="140" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="live" value="直播接入面 local://live&#10;单发布者(409) · 令牌常量时间比较&#10;每订阅者独立队列 · 慢订阅者整块丢弃" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="gGw">
+          <mxGeometry x="30" y="310" width="270" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="rproxy" value="ReverseProxy&#10;Director 注入 X-Real-IP / X-Forwarded-*&#10;路径透传 · 502 统一错误体" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="gGw">
+          <mxGeometry x="30" y="395" width="270" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="eRoutePlugin" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="gGw" source="route" target="plugin">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ePluginBackend" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="gGw" source="plugin" target="backend">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eBackendLive" value="local://" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="gGw" source="backend" target="live">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eBackendProxy" value="http://" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="gGw" source="backend" target="rproxy">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="gNexus" value="转码分发 · go-nexus-stream :8099" style="swimlane;html=1;startSize=26;rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="760" y="60" width="380" height="470" as="geometry" />
+        </mxCell>
+        <mxCell id="probe" value="硬件探针&#10;ffmpeg 存在 → nvenc 已编译 → 真跑 5 帧" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="gNexus">
+          <mxGeometry x="30" y="45" width="320" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="tr" value="FFmpeg 双轨转码&#10;GPU: h264_nvenc p5/hq/CBR/spatial-aq/bf 0&#10;CPU: libx264 540p12 自愈&#10;FitToSource 按源收敛（只降不升）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="gNexus">
+          <mxGeometry x="30" y="120" width="320" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="rtp" value="本地 RTP 中转&#10;监听 127.0.0.1:5004&#10;改写 SSRC / seq / ts" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="gNexus">
+          <mxGeometry x="30" y="225" width="320" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="pion" value="Pion WebRTC&#10;单 Track 多 Peer（一次 WriteRTP 复制）&#10;非 Trickle 一次协商 · RTCP 读泵保 NACK/PLI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="gNexus">
+          <mxGeometry x="30" y="310" width="320" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="api" value="控制面 REST / WS / 静态 SPA&#10;/api/status · /ws/telemetry(1Hz)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="gNexus">
+          <mxGeometry x="30" y="400" width="320" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="eProbeTr" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=open;dashed=1;" edge="1" parent="gNexus" source="probe" target="tr">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eTrRtp" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="gNexus" source="tr" target="rtp">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eRtpPion" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="gNexus" source="rtp" target="pion">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="gFe" value="浏览器（无插件）" style="swimlane;html=1;startSize=26;rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="1200" y="60" width="330" height="300" as="geometry" />
+        </mxCell>
+        <mxCell id="ui" value="Vue3 + Vite + Tailwind + ECharts&#10;暗黑大屏 · object-contain 不裁切&#10;动态坐标轴跟随后端真实规格" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="gFe">
+          <mxGeometry x="25" y="45" width="280" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="video" value="video 标签播放 WebRTC 媒体流" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="gFe">
+          <mxGeometry x="25" y="135" width="280" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="banner" value="状态条：探针 / 双轨 / 转码 / RTP / WS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="gFe">
+          <mxGeometry x="25" y="200" width="280" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="eUiVideo" style="html=1;endArrow=block;" edge="1" parent="gFe" source="ui" target="video">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eUiBanner" style="html=1;endArrow=none;dashed=1;" edge="1" parent="gFe" source="ui" target="banner">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ePutLive" value="媒体面：推流" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;fontStyle=1;" edge="1" parent="1" source="put" target="live">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eLiveTr" value="媒体面：拉流 GET /ingest/live/cam0（chunked）" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;fontStyle=1;" edge="1" parent="1" source="live" target="tr">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eProxyApi" value="控制面：/api · /ws · /assets · /" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;dashed=1;" edge="1" parent="1" source="rproxy" target="api">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ePionVideo" value="WebRTC 媒体" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;strokeWidth=2;fontStyle=1;" edge="1" parent="1" source="pion" target="video">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eApiUi" value="状态快照 + WS 1Hz" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;dashed=1;" edge="1" parent="1" source="api" target="ui">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="notes" value="说明：媒体面走 local://live 进程内扇出，不进 ReverseProxy；控制面才走反代。&#10;网关 read_timeout / write_timeout = 0（推流、拉流、WS 都是长连接）。&#10;端口：采集端 → 网关 8082；网关 → nexus-core 8099；FFmpeg → Pion RTP 5004（本机回环）。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;align=left;spacingLeft=8;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="30" y="570" width="1110" height="70" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="gateway" name="02 网关内部">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="p2_req" value="http.Request&#10;ServeHTTP" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_pool" value="gwctx.GetContext()&#10;sync.Pool（data map 预分配 8）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="40" y="170" width="180" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_match" value="router.Match(method, path)&#10;atomic.Value.Load → 快照&#10;exact[method+&quot;:&quot;+path]&#10;0 allocs / 0 locks" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="40" y="270" width="180" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_404" value="404 route not found" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="300" y="270" width="150" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_pipe" value="pipeline.Execute(ctx)&#10;洋葱插件链 Next() / Abort()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="40" y="410" width="180" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p2_plugBox" value="内置插件（可组合）" style="swimlane;html=1;startSize=26;rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="290" y="400" width="300" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_auth" value="auth&#10;Bearer 校验 → 401 并 Abort" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="p2_plugBox">
+          <mxGeometry x="20" y="40" width="260" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_rl" value="rate_limit&#10;令牌桶 CAS 更新，无互斥锁" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="p2_plugBox">
+          <mxGeometry x="20" y="100" width="260" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_met" value="metrics&#10;原子计数 → /stats" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="p2_plugBox">
+          <mxGeometry x="20" y="160" width="260" height="45" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p2_local" value="backend 是 local:// ?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="60" y="520" width="140" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_abort" value="ctx.IsAborted() → 直接返回&#10;不转发" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="40" y="640" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_handler" value="进程内 Handler（live.Hub）&#10;单发布者 → 多订阅者扇出" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="270" y="530" width="220" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_rp" value="httputil.ReverseProxy&#10;director: 重写 URL + X-Real-IP / X-Forwarded-*&#10;errorHandler: 502 统一错误体" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="530" y="530" width="280" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_put" value="defer gwctx.PutContext(ctx)&#10;Reset() 后归还池（handlers 切片复用）" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="270" y="640" width="250" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p2_cfg" value="配置 Watcher&#10;文件变更 → 解析校验" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="620" y="80" width="200" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_write" value="AddRoute / RemoveRoute&#10;COW 复制整表 → atomic.Store&#10;写成本 O(表长)&#10;实测 10/100/1000 条：1.09/4.11/25.33 µs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="620" y="170" width="250" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_hub" value="live.Hub 复用&#10;热更新不打断在线推拉流" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="620" y="300" width="250" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_legend" value="读路径（每请求）：原子加载 + 一次 map 查找 + 池化上下文 → 实测 0 allocs/op&#10;写路径（热更新）：复制整表后原子替换 → 在途请求继续用旧快照，无锁无阻塞&#10;因此「热更新」与「高并发读」互不干扰。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;align=left;spacingLeft=8;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="740" width="830" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p2_e1" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="p2_req" target="p2_pool">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_e2" style="edgeStyle=orthogonalEdgeStyle;html=1;endArrow=block;" edge="1" parent="1" source="p2_pool" target="p2_match">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_e3" value="未命中" style="html=1;endArrow=block;" edge="1" parent="1" source="p2_match" target="p2_404">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_e4" value="命中" style="html=1;endArrow=block;" edge="1" parent="1" source="p2_match" target="p2_pipe">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_e5" style="html=1;endArrow=block;" edge="1" parent="1" source="p2_pipe" target="p2_plugBox">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_e6" value="Abort" style="html=1;endArrow=block;dashed=1;" edge="1" parent="1" source="p2_plugBox" target="p2_abort">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_e7" style="html=1;endArrow=block;" edge="1" parent="1" source="p2_pipe" target="p2_local">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_e8" value="是" style="html=1;endArrow=block;" edge="1" parent="1" source="p2_local" target="p2_handler">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_e9" value="否" style="html=1;endArrow=block;" edge="1" parent="1" source="p2_local" target="p2_rp">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_e10" style="html=1;endArrow=block;" edge="1" parent="1" source="p2_handler" target="p2_put">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_e11" style="html=1;endArrow=block;" edge="1" parent="1" source="p2_rp" target="p2_put">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_e12" style="html=1;endArrow=block;" edge="1" parent="1" source="p2_cfg" target="p2_write">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_e13" style="html=1;endArrow=block;" edge="1" parent="1" source="p2_write" target="p2_hub">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_e14" value="原子替换路由表" style="html=1;endArrow=open;dashed=1;" edge="1" parent="1" source="p2_write" target="p2_match">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="agent" name="03 采集端状态机">
+    <mxGraphModel dx="1300" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1300" pageHeight="780" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="p3_start" value="启动 cam-push" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="40" y="120" width="130" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_list" value="设备枚举&#10;-list / -device auto&#10;解析 dshow 列表，跳过音频段" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="220" y="100" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_startff" value="启动 FFmpeg&#10;dshow + libx264 + mpegts&#10;CREATE_NO_WINDOW" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="480" y="100" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_connect" value="建连&#10;PUT /ingest/live/{name}&#10;chunked + X-Ingest-Token" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="740" y="100" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_stdio" value="ffmpeg stdout → HTTP body&#10;5s 采样打印 Mbps / 累计 MB&#10;stderr 逐行转发 ffmpeg| 前缀" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="740" y="240" width="240" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_break" value="连接断开 / 异常退出" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="460" y="250" width="190" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_cleanup" value="必清理&#10;Kill() + Wait()，不留野 ffmpeg" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="200" y="250" width="200" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_backoff" value="指数退避&#10;1s → 2s → 4s … 上限 10s&#10;稳定 &gt; 30s 则重置为 1s" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="200" y="380" width="200" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_sig" value="Ctrl+C / SIGTERM" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="520" y="420" width="160" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_stop" value="停止子进程 → 退出" style="ellipse;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="520" y="530" width="160" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_note" value="关键点：&#10;1) 401 / 409 在网关读 body 之前就返回 → 错误令牌或重复推流不会白推一帧。&#10;2) 退避重置条件是「上一次连接稳定跑过 30 秒」，避免偶发抖动后重连间隔越拖越长。&#10;3) 确定性错误（设备被占用等）会以固定节奏在日志里复现，便于现场定位。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#999999;align=left;spacingLeft=8;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="620" width="900" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p3_e1" style="html=1;endArrow=block;" edge="1" parent="1" source="p3_start" target="p3_list">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_e2" style="html=1;endArrow=block;" edge="1" parent="1" source="p3_list" target="p3_startff">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_e3" style="html=1;endArrow=block;" edge="1" parent="1" source="p3_startff" target="p3_connect">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_e4" value="200 → 推流中" style="html=1;endArrow=block;" edge="1" parent="1" source="p3_connect" target="p3_stdio">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_e5" value="异常" style="html=1;endArrow=block;dashed=1;" edge="1" parent="1" source="p3_stdio" target="p3_break">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_e6" value="错误码 / 连接失败" style="html=1;endArrow=block;dashed=1;" edge="1" parent="1" source="p3_connect" target="p3_break">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_e7" style="html=1;endArrow=block;" edge="1" parent="1" source="p3_break" target="p3_cleanup">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_e8" style="html=1;endArrow=block;" edge="1" parent="1" source="p3_cleanup" target="p3_backoff">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_e9" value="重连" style="html=1;endArrow=block;strokeWidth=2;" edge="1" parent="1" source="p3_backoff" target="p3_startff">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p3_e10" value="任意状态收到信号" style="html=1;endArrow=block;dashed=1;" edge="1" parent="1" source="p3_sig" target="p3_stop">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="nexus" name="04 转码分发内部">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="860" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="p4_src" value="输入源&#10;HTTP(网关) / RTSP / 文件" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="40" y="60" width="180" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_probe" value="ffprobe 探源&#10;宽 / 高 / 帧率&#10;失败回退标称规格" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="40" y="160" width="180" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_fit" value="FitToSource 收敛&#10;只降不升 · 等比 · 偶数对齐&#10;码率 = 像素 × fps × 0.12bpp&#10;夹在 2.5 – 8 Mbps" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="40" y="270" width="180" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_mode" value="编码轨选择" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="60" y="400" width="140" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_gpu" value="GPU_ACCELERATION&#10;h264_nvenc&#10;p5 / tune hq / -bf 0&#10;CBR · spatial-aq 1 · profile high" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="250" y="390" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_cpu" value="CPU_SELF_HEALING&#10;libx264 veryfast&#10;540p @ 12fps 兜底" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="250" y="510" width="220" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_ff" value="FFmpeg 子进程&#10;lanczos 缩放 → H.264 → RTP&#10;-f rtp rtp://127.0.0.1:5004" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="520" y="390" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_guard" value="守护 / 退避重启&#10;restarts 计数 · 优雅退出" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="520" y="510" width="240" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_hwprobe" value="硬件探针（3 级）&#10;1 ffmpeg 存在&#10;2 nvenc 已编译&#10;3 真跑 5 帧最小硬编码&#10;失败翻译成可执行结论" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="520" y="60" width="240" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_rtp" value="RTP 中转&#10;监听 5004，逐包解析&#10;统一改写 SSRC / seq / ts&#10;计数：received / forwarded / dropped" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="810" y="390" width="240" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_pion" value="Pion WebRTC v4&#10;单 Track 多 Peer&#10;一次 WriteRTP 复制给所有浏览器&#10;非 Trickle · RTCP 读泵" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="390" width="250" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_br" value="浏览器 video 标签&#10;无插件播放" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="230" width="250" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_stat" value="/api/status 全量快照&#10;probe · transcoder · rtp · webrtc · ws · source_caps" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="810" y="130" width="240" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_ws" value="/ws/telemetry 1Hz 广播&#10;慢客户端直接丢弃" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="810" y="240" width="240" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_dash" value="Vue3 大屏&#10;ECharts 动态坐标轴 + 状态条" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="120" width="250" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_note" value="排障存档：FFmpeg 8 下 -tune hq 与 -zerolatency 1 并存 → NVENC 首帧 generic error 20，进程秒退、守护无限重启。&#10;改为 -bf 0 后：45 秒内 31 次崩溃 → 11.2 小时累计 1 次；1280x720@30 / 3318 kbps / rtp dropped=0。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;align=left;spacingLeft=8;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="650" width="1310" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p4_e1" style="html=1;endArrow=block;" edge="1" parent="1" source="p4_src" target="p4_probe">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_e2" style="html=1;endArrow=block;" edge="1" parent="1" source="p4_probe" target="p4_fit">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_e3" style="html=1;endArrow=block;" edge="1" parent="1" source="p4_fit" target="p4_mode">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_e4" value="可用" style="html=1;endArrow=block;" edge="1" parent="1" source="p4_mode" target="p4_gpu">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_e5" value="不可用 / 熔断" style="html=1;endArrow=block;dashed=1;" edge="1" parent="1" source="p4_mode" target="p4_cpu">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_e6" style="html=1;endArrow=block;" edge="1" parent="1" source="p4_gpu" target="p4_ff">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_e7" style="html=1;endArrow=block;" edge="1" parent="1" source="p4_cpu" target="p4_ff">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_e8" style="html=1;endArrow=block;dashed=1;" edge="1" parent="1" source="p4_guard" target="p4_ff">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_e9" style="html=1;endArrow=block;dashed=1;" edge="1" parent="1" source="p4_hwprobe" target="p4_mode">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_e10" value="RTP 包" style="html=1;endArrow=block;strokeWidth=2;" edge="1" parent="1" source="p4_ff" target="p4_rtp">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_e11" style="html=1;endArrow=block;strokeWidth=2;" edge="1" parent="1" source="p4_rtp" target="p4_pion">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_e12" value="媒体流" style="html=1;endArrow=block;strokeWidth=2;" edge="1" parent="1" source="p4_pion" target="p4_br">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_e13" style="html=1;endArrow=open;dashed=1;" edge="1" parent="1" source="p4_rtp" target="p4_stat">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_e14" style="html=1;endArrow=open;dashed=1;" edge="1" parent="1" source="p4_pion" target="p4_ws">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_e15" style="html=1;endArrow=block;dashed=1;" edge="1" parent="1" source="p4_stat" target="p4_dash">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="p4_e16" style="html=1;endArrow=block;dashed=1;" edge="1" parent="1" source="p4_ws" target="p4_dash">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

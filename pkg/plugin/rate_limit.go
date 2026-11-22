@@ -9,10 +9,10 @@ import (
 
 // RateLimitPlugin 令牌桶限流插件
 type RateLimitPlugin struct {
-	rate     int64         // 每秒令牌数
-	capacity int64         // 桶容量
-	tokens   int64         // 当前令牌数
-	lastTime int64         // 上次补充时间（unix nano）
+	rate     int64 // 每秒令牌数
+	capacity int64 // 桶容量
+	tokens   int64 // 当前令牌数
+	lastTime int64 // 上次补充时间（unix nano）
 }
 
 // NewRateLimitPlugin 创建限流插件

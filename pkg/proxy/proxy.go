@@ -12,12 +12,36 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"time"
 
 	gwctx "github.com/yfyadmin/go-apisix-extend/pkg/context"
 	"github.com/yfyadmin/go-apisix-extend/pkg/plugin"
 	"github.com/yfyadmin/go-apisix-extend/pkg/router"
 )
+
+// localScheme 本地处理器路由前缀：backend 写成 local://<name> 时由网关进程内处理。
+const localScheme = "local://"
+
+// defaultTransport 返回网关默认的上游连接池。
+//
+// 标准库 http.DefaultTransport 的 MaxIdleConnsPerHost 只有 2，
+// 高并发转发同一后端时会频繁新建/关闭连接（握手开销放大 + TIME_WAIT 堆积）。
+// 这里克隆默认值后放宽空闲连接上限；用包级单例，配置热加载重建 Proxy 时复用同一连接池。
+var defaultTransport = newDefaultTransport()
+
+// newDefaultTransport 基于 DefaultTransport 克隆并放宽空闲连接参数。
+func newDefaultTransport() *http.Transport {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		return &http.Transport{}
+	}
+	t := base.Clone()
+	t.MaxIdleConns = 10000
+	t.MaxIdleConnsPerHost = 2000
+	t.IdleConnTimeout = 90 * time.Second
+	return t
+}
 
 // GatewayProxy 网关代理
 // 整合路由、插件流水线、上下文池和反向代理
@@ -26,6 +50,8 @@ type GatewayProxy struct {
 	pipeline     plugin.Pipeline
 	reverseProxy *httputil.ReverseProxy
 	timeout      time.Duration
+	// locals 本地处理器注册表（直播接入面等非反向代理场景）
+	locals map[string]http.Handler
 }
 
 // ProxyOption 网关代理配置选项
@@ -38,12 +64,27 @@ func WithTimeout(timeout time.Duration) ProxyOption {
 	}
 }
 
+// WithLocalHandler 注册本地处理器。
+//
+// 路由配置里把 backend 写成 local://<name>，该路由就会交给网关进程内的处理器，
+// 不再进行反向代理。适合直播接入面（/ingest/live/*）、内嵌管理面等场景，
+// 同时仍然复用无锁路由与插件流水线（鉴权 / 限流 / 指标）。
+func WithLocalHandler(name string, handler http.Handler) ProxyOption {
+	return func(p *GatewayProxy) {
+		if p.locals == nil {
+			p.locals = make(map[string]http.Handler, 2)
+		}
+		p.locals[name] = handler
+	}
+}
+
 // NewGatewayProxy 创建网关代理
 func NewGatewayProxy(r router.Router, p plugin.Pipeline, opts ...ProxyOption) *GatewayProxy {
 	gp := &GatewayProxy{
 		router:   r,
 		pipeline: p,
 		timeout:  30 * time.Second,
+		locals:   make(map[string]http.Handler, 2),
 	}
 
 	for _, opt := range opts {
@@ -55,9 +96,18 @@ func NewGatewayProxy(r router.Router, p plugin.Pipeline, opts ...ProxyOption) *G
 		Director:       gp.director,
 		ModifyResponse: gp.modifyResponse,
 		ErrorHandler:   gp.errorHandler,
+		Transport:      defaultTransport,
 	}
 
 	return gp
+}
+
+// localBackend 解析 local:// 后端地址
+func localBackend(backend string) (string, bool) {
+	if strings.HasPrefix(backend, localScheme) {
+		return strings.TrimPrefix(backend, localScheme), true
+	}
+	return "", false
 }
 
 // ServeHTTP 实现 http.Handler 接口
@@ -65,7 +115,7 @@ func NewGatewayProxy(r router.Router, p plugin.Pipeline, opts ...ProxyOption) *G
 // 1. 从池中获取 Context
 // 2. 路由匹配
 // 3. 执行插件流水线
-// 4. 反向代理转发
+// 4. local:// 路由交给本地处理器，其余反向代理转发
 // 5. 释放 Context 回池
 func (p *GatewayProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 1. 从池中获取 Context
@@ -91,7 +141,18 @@ func (p *GatewayProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 4. 将路由信息注入请求 context，供 director 使用
+	// 4a. 本地处理器：直播接入面等不需要反向代理的能力
+	if name, isLocal := localBackend(route.Backend); isLocal {
+		handler, found := p.locals[name]
+		if !found {
+			http.Error(w, `{"error":"local handler not registered","code":500}`, http.StatusInternalServerError)
+			return
+		}
+		handler.ServeHTTP(w, r)
+		return
+	}
+
+	// 4b. 将路由信息注入请求 context，供 director 使用
 	// 注意：WithContext 返回新请求，ReverseProxy 内部会使用它
 	reqWithRoute := r.WithContext(context.WithValue(r.Context(), routeKey, route))
 
@@ -108,7 +169,11 @@ func (p *GatewayProxy) director(req *http.Request) {
 		if targetURL, err := url.Parse(route.Backend); err == nil {
 			req.URL.Scheme = targetURL.Scheme
 			req.URL.Host = targetURL.Host
-			req.URL.Path = targetURL.Path
+			// 仅当后端地址自带路径前缀时才拼接；否则保留客户端原始路径，
+			// 保证 /api/status、/assets/index.js、/ws/telemetry 原样透传到上游。
+			if targetURL.Path != "" && targetURL.Path != "/" {
+				req.URL.Path = singleJoiningSlash(targetURL.Path, req.URL.Path)
+			}
 		}
 	}
 
@@ -118,6 +183,19 @@ func (p *GatewayProxy) director(req *http.Request) {
 	}
 	req.Header.Set("X-Forwarded-For", req.RemoteAddr)
 	req.Header.Set("X-Forwarded-Host", req.Host)
+}
+
+// singleJoiningSlash 拼接后端前缀路径与请求路径，避免出现 // 或缺失 /
+func singleJoiningSlash(prefix, path string) string {
+	aslash := strings.HasSuffix(prefix, "/")
+	bslash := strings.HasPrefix(path, "/")
+	switch {
+	case aslash && bslash:
+		return prefix + path[1:]
+	case !aslash && !bslash:
+		return prefix + "/" + path
+	}
+	return prefix + path
 }
 
 // modifyResponse 自定义 ModifyResponse 回调
